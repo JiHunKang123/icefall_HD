@@ -815,14 +815,24 @@ def train_one_epoch(
 
         try:
             with torch.cuda.amp.autocast(enabled=params.use_fp16):
-                loss, loss_info = compute_loss(
-                    params=params,
-                    model=model,
-                    sp=sp,
-                    batch=batch,
-                    is_training=True,
-                    warmup=(params.batch_idx_train / params.model_warm_step),
-                )
+                if params.delay_penalty == 0:
+                    loss, loss_info = compute_loss(
+                        params=params,
+                        model=model,
+                        sp=sp,
+                        batch=batch,
+                        is_training=True,
+                        warmup=(params.batch_idx_train / params.model_warm_step),
+                    )
+                else:
+                    loss, loss_info = compute_loss(
+                        params=params,
+                        model=model,
+                        sp=sp,
+                        batch=batch,
+                        is_training=True,
+                        warmup=2.0,
+                    )
             # summary stats
             tot_loss = (tot_loss * (1 - 1 / params.reset_interval)) + loss_info
 
