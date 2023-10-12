@@ -17,7 +17,7 @@ with open(input_txt, 'r') as f:
 decomposed_lines=[]
 for line in lines:
   line = line.replace('\n','')
-  decomposed_line = hgtk.text.decompose(line).replace('ᴥ','ㄿ')
+  decomposed_line = hgtk.text.decompose(line).replace('ᴥ','ㄽ')
   decomposed_lines.append(decomposed_line+'\n')
 
 with open(output_txt, 'w') as f:

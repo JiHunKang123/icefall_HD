@@ -15,4 +15,4 @@
   --decoder-dim 512 \
   --joiner-dim 640 \
   --initial-lr 0.006 \
-  --bpe-model data/lang_bpe_250/bpe.model
+  --bpe-model data/lang_bpe_2000/bpe.model

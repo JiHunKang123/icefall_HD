@@ -5,15 +5,15 @@ stop_stage=999
 
 vocab_sizes=(
   # 5000
-  250
+  2000
   # 1000
   # 500
 )
 
 dl_dir=data
-kaldi_format_train=$dl_dir/HD_100_train # wav
+kaldi_format_train=$dl_dir/HD_100_train
 kaldi_format_test=$dl_dir/HD_100_test
-kaldi_format_lexicon=$dl_dir/lm_grapheme/lexicon_grapheme.txt
+kaldi_format_lexicon=$dl_dir/lm_letter/librispeech-lexicon.txt
 dir_train=data/HD_100_train_manifest
 dir_valid=data/HD_100_valid_manifest
 dir_test=data/HD_100_test_manifest
@@ -33,24 +33,10 @@ if [ $stage -le -1 ] && [ $stop_stage -ge -1 ]; then
   # output: lhotse style manifests
   local/subset_data_dir_tr_cv.sh --cv-spk-percent 10 $kaldi_format_train \
     data/train_90 data/train_10 || exit 1;
-  
-  cp -r $kaldi_format_test data/test
 
-  # decompose
-  rm -f data/text_decomposed.txt
-  touch data/text_decomposed.txt
-  for dataset in train_90 train_10 test; do
-    cp -r data/$dataset data/${dataset}_grapheme
-    cat data/$dataset/text | sed -e s/'\t'/' '/g | cut -d " " -f 2- > data/$dataset/text.txt
-    cat data/$dataset/text | awk '{ print $1 }' > data/$dataset/utt
-    python local/decompose2.py data/$dataset/text.txt data/${dataset}_grapheme/text.txt
-    paste data/${dataset}/utt data/${dataset}_grapheme/text.txt > data/${dataset}_grapheme/text
-    cat data/${dataset}_grapheme/text.txt >> data/text_decomposed.txt
-  done
-
-  lhotse kaldi import data/train_90_grapheme $smapling_rate $dir_train
-  lhotse kaldi import data/train_10_grapheme $smapling_rate $dir_valid
-  lhotse kaldi import data/test_grapheme $smapling_rate $dir_test
+  lhotse kaldi import data/train_90 $smapling_rate $dir_train
+  lhotse kaldi import data/train_10 $smapling_rate $dir_valid
+  lhotse kaldi import $kaldi_format_test $smapling_rate $dir_test
 
   mkdir -p $dir_combine
   cp -r $dir_train/recordings.jsonl.gz $dir_combine/librispeech_recordings_train-clean-100.jsonl.gz
@@ -111,7 +97,7 @@ if [ $stage -le 5 ] && [ $stop_stage -ge 5 ]; then
   mkdir -p $lang_dir
 
   (echo '!SIL SIL'; echo '<SPOKEN_NOISE> SPN'; echo '<UNK> SPN'; ) |
-    cat - $kaldi_format_lexicon | sed s/'ᴥ'/'ㄿ'/g |
+    cat - $kaldi_format_lexicon |
     sort | uniq > $lang_dir/lexicon.txt
 
   if [ ! -f $lang_dir/L_disambig.pt ]; then
@@ -147,16 +133,23 @@ if [ $stage -le 6 ] && [ $stop_stage -ge 6 ]; then
 
     if [ ! -f $lang_dir/transcript_words.txt ]; then
       log "Generate data for BPE training"
-      cat data/text_decomposed.txt > $lang_dir/transcript_words.txt
+      # files=$(
+      #   find "$dl_dir/LibriSpeech/train-clean-100" -name "*.trans.txt"
+      #   find "$dl_dir/LibriSpeech/train-clean-360" -name "*.trans.txt"
+      #   find "$dl_dir/LibriSpeech/train-other-500" -name "*.trans.txt"
+      # )
+      # for f in ${files[@]}; do
+      #   cat $f | cut -d " " -f 2-
+      # done > $lang_dir/transcript_words.txt
+      cat $kaldi_format_train/text | sed -e s/'\t'/' '/g | cut -d " " -f 2- > $lang_dir/transcript_words.txt
+      cat $kaldi_format_test/text | sed -e s/'\t'/' '/g | cut -d " " -f 2- >> $lang_dir/transcript_words.txt
     fi
 
     if [ ! -f $lang_dir/bpe.model ]; then
       ./local/train_bpe_model.py \
         --lang-dir $lang_dir \
         --vocab-size $vocab_size \
-        --transcript $lang_dir/transcript_words.txt \
-        --max-sentencepiece-length 2 \
-        --normalization-rule-name identity
+        --transcript $lang_dir/transcript_words.txt
     fi
 
     if [ ! -f $lang_dir/L_disambig.pt ]; then
@@ -202,7 +195,7 @@ if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
 
     if [ ! -f $lang_dir/P.arpa ]; then
       ./shared/make_kn_lm.py \
-        -ngram-order 5 \
+        -ngram-order 2 \
         -text $lang_dir/transcript_tokens.txt \
         -lm $lang_dir/P.arpa
     fi
@@ -211,7 +204,7 @@ if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
       python3 -m kaldilm \
         --read-symbol-table="$lang_dir/tokens.txt" \
         --disambig-symbol='#0' \
-        --max-order=5 \
+        --max-order=2 \
         $lang_dir/P.arpa > $lang_dir/P.fst.txt
     fi
   done
@@ -225,22 +218,20 @@ if [ $stage -le 8 ] && [ $stop_stage -ge 8 ]; then
   mkdir -p data/lm
   if [ ! -f data/lm/G_3_gram.fst.txt ]; then
     # It is used in building HLG
-    cat $dl_dir/lm_grapheme/3gram_grapheme.arpa |sed s/'ᴥ'/'ㄿ'/g > data/3gram_grapheme.arpa
     python3 -m kaldilm \
       --read-symbol-table="data/lang_phone/words.txt" \
       --disambig-symbol='#0' \
       --max-order=3 \
-      data/3gram_grapheme.arpa > data/lm/G_3_gram.fst.txt
+      $dl_dir/lm_letter/3gram.arpa > data/lm/G_3_gram.fst.txt
   fi
 
   if [ ! -f data/lm/G_4_gram.fst.txt ]; then
     # It is used for LM rescoring
-    cat $dl_dir/lm_grapheme/4gram_grapheme.arpa |sed s/'ᴥ'/'ㄿ'/g > data/4gram_grapheme.arpa
     python3 -m kaldilm \
       --read-symbol-table="data/lang_phone/words.txt" \
       --disambig-symbol='#0' \
       --max-order=4 \
-      data/4gram_grapheme.arpa > data/lm/G_4_gram.fst.txt
+      $dl_dir/lm_letter/4gram.arpa > data/lm/G_4_gram.fst.txt
   fi
 fi
 

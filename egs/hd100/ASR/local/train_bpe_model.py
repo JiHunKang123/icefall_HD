@@ -58,12 +58,14 @@ def get_args():
         "--max-sentencepiece-length",
         type=int,
         help="Maximum size of word piece",
+        default=4,
     )
 
     parser.add_argument(
         "--normalization-rule-name",
         type=str,
         help="Normalization rule",
+        default="nmt_nfkc",
     )    
 
     return parser.parse_args()
