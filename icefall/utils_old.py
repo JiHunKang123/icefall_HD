@@ -193,27 +193,16 @@ def encode_supervisions(
     returned tensor and list of strings are guaranteed to be consistent with
     each other.
     """
-    try: start_frame = supervisions["start_frame"]
-    except: start_frame = torch.IntTensor([0 for i in range(len(supervisions["cut"]))])
-
-    try: num_frames = supervisions["num_frames"]
-    except:
-        num_frames = []
-        for supervision in supervisions["cut"]:
-            try: num_frames.append(supervision.tracks[0].cut.recording.num_samples)
-            except: num_frames.append(supervision.recording.num_samples)
-        num_frames = torch.IntTensor(num_frames)
-        
     supervision_segments = torch.stack(
         (
             supervisions["sequence_idx"],
             torch.div(
-                start_frame,
+                supervisions["start_frame"],
                 subsampling_factor,
                 rounding_mode="floor",
             ),
             torch.div(
-                num_frames,
+                supervisions["num_frames"],
                 subsampling_factor,
                 rounding_mode="floor",
             ),
@@ -272,6 +261,70 @@ def get_texts(
         return aux_labels
     else:
         return aux_labels.tolist()
+
+
+def encode_supervisions_otc(
+    supervisions: dict,
+    subsampling_factor: int,
+    token_ids: Optional[List[List[int]]] = None,
+) -> Tuple[torch.Tensor, Union[List[str], List[List[int]]]]:
+    """
+    Encodes Lhotse's ``batch["supervisions"]`` dict into
+    a pair of torch Tensor, and a list of transcription strings or token indexes
+
+    The supervision tensor has shape ``(batch_size, 3)``.
+    Its second dimension contains information about sequence index [0],
+    start frames [1] and num frames [2].
+
+    The batch items might become re-ordered during this operation -- the
+    returned tensor and list of strings are guaranteed to be consistent with
+    each other.
+    """
+    supervision_segments = torch.stack(
+        (
+            supervisions["sequence_idx"],
+            torch.div(
+                supervisions["start_frame"],
+                subsampling_factor,
+                rounding_mode="floor",
+            ),
+            torch.div(
+                supervisions["num_frames"],
+                subsampling_factor,
+                rounding_mode="floor",
+            ),
+        ),
+        1,
+    ).to(torch.int32)
+
+    indices = torch.argsort(supervision_segments[:, 2], descending=True)
+    supervision_segments = supervision_segments[indices]
+
+    ids = []
+    verbatim_texts = []
+    sorted_ids = []
+    sorted_verbatim_texts = []
+
+    for cut in supervisions["cut"]:
+        id = cut.id
+        if hasattr(cut.supervisions[0], "verbatim_text"):
+            verbatim_text = cut.supervisions[0].verbatim_text
+        else:
+            verbatim_text = ""
+        ids.append(id)
+        verbatim_texts.append(verbatim_text)
+
+    for index in indices.tolist():
+        sorted_ids.append(ids[index])
+        sorted_verbatim_texts.append(verbatim_texts[index])
+
+    if token_ids is None:
+        texts = supervisions["text"]
+        res = [texts[idx] for idx in indices]
+    else:
+        res = [token_ids[idx] for idx in indices]
+
+    return supervision_segments, res, sorted_ids, sorted_verbatim_texts
 
 
 @dataclass
