@@ -193,16 +193,27 @@ def encode_supervisions(
     returned tensor and list of strings are guaranteed to be consistent with
     each other.
     """
+    try: start_frame = supervisions["start_frame"]
+    except: start_frame = torch.IntTensor([0 for i in range(len(supervisions["cut"]))])
+
+    try: num_frames = supervisions["num_frames"]
+    except:
+        num_frames = []
+        for supervision in supervisions["cut"]:
+            try: num_frames.append(supervision.tracks[0].cut.recording.num_samples)
+            except: num_frames.append(supervision.recording.num_samples)
+        num_frames = torch.IntTensor(num_frames)
+        
     supervision_segments = torch.stack(
         (
             supervisions["sequence_idx"],
             torch.div(
-                supervisions["start_frame"],
+                start_frame,
                 subsampling_factor,
                 rounding_mode="floor",
             ),
             torch.div(
-                supervisions["num_frames"],
+                num_frames,
                 subsampling_factor,
                 rounding_mode="floor",
             ),
