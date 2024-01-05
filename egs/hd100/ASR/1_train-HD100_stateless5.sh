@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+vocab_sizes=250
 ./pruned_transducer_stateless5/train.py \
   --world-size 4 \
   --num-epochs 30 \
@@ -15,4 +15,4 @@
   --decoder-dim 512 \
   --joiner-dim 640 \
   --initial-lr 0.006 \
-  --bpe-model data/lang_bpe_2000/bpe.model
+  --bpe-model data/lang_bpe_${vocab_sizes}/bpe.model
