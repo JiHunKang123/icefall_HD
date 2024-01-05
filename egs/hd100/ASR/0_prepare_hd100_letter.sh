@@ -11,9 +11,9 @@ vocab_sizes=(
 )
 
 dl_dir=data
-kaldi_format_train=$dl_dir/HD_100_train
-kaldi_format_test=$dl_dir/HD_100_test
-kaldi_format_lexicon=$dl_dir/lm_letter/librispeech-lexicon.txt
+kaldi_format_train=prepared_data/HD_100_train
+kaldi_format_test=prepared_data/HD_100_test
+kaldi_format_lexicon=prepared_data/lm_letter/librispeech-lexicon.txt
 dir_train=data/HD_100_train_manifest
 dir_valid=data/HD_100_valid_manifest
 dir_test=data/HD_100_test_manifest
@@ -222,7 +222,7 @@ if [ $stage -le 8 ] && [ $stop_stage -ge 8 ]; then
       --read-symbol-table="data/lang_phone/words.txt" \
       --disambig-symbol='#0' \
       --max-order=3 \
-      $dl_dir/lm_letter/3gram.arpa > data/lm/G_3_gram.fst.txt
+      prepared_data/lm_letter/3gram.arpa > data/lm/G_3_gram.fst.txt
   fi
 
   if [ ! -f data/lm/G_4_gram.fst.txt ]; then
@@ -231,7 +231,7 @@ if [ $stage -le 8 ] && [ $stop_stage -ge 8 ]; then
       --read-symbol-table="data/lang_phone/words.txt" \
       --disambig-symbol='#0' \
       --max-order=4 \
-      $dl_dir/lm_letter/4gram.arpa > data/lm/G_4_gram.fst.txt
+      prepared_data/lm_letter/4gram.arpa > data/lm/G_4_gram.fst.txt
   fi
 fi
 
