@@ -23,7 +23,7 @@ node_modules
 .nfs*
 
 # Ignore all text files
-*.txt
+#*.txt
 
 # Ignore files related to API keys
 .env
@@ -35,4 +35,4 @@ node_modules
 *.bin
 .DS_Store
 *.fst
-*.arpa
+#*.arpa
