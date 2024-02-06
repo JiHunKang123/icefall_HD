@@ -87,7 +87,7 @@ import sentencepiece as spm
 import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
-from asr_datamodule import LibriSpeechAsrDataModule, CommonVoiceAsrDataModule
+from asr_datamodule import LibriSpeechAsrDataModule
 from decoder import Decoder
 from joiner import Joiner
 from lhotse.cut import Cut
@@ -205,21 +205,6 @@ def add_rep_arguments(parser: argparse.ArgumentParser):
         type=int,
         default=200,
         help="decode interval",
-    )
-    
-    ########## for CommonVoice ##########
-    parser.add_argument(
-        "--data-type",
-        type=str,
-        default='librispeech',
-        help="Type of dataset (e.g. librispeech or commonvoice)",
-    )
-
-    parser.add_argument(
-        "--lid",
-        type=str2bool,
-        default=False,
-        help="To use language identification(True) or not(False)"
     )
         
 
@@ -562,7 +547,7 @@ def get_params() -> AttributeDict:
             "batch_idx_train": 0,
             "log_interval": 50,
             "reset_interval": 200,
-            "valid_interval": 30000000,  # For the 100h subset, use 800
+            "valid_interval": 3000,  # For the 100h subset, use 800
             # parameters for zipformer
             "feature_dim": 80,
             "subsampling_factor": 320,  # not passed in, this is fixed.
@@ -643,7 +628,6 @@ def get_transducer_model(params: AttributeDict) -> nn.Module:
         decoder_dim=params.decoder_dim,
         joiner_dim=params.joiner_dim,
         vocab_size=params.vocab_size,
-        lid=params.lid,
     )
     return model
 
@@ -794,14 +778,13 @@ def compute_loss(
         values >= 1.0 are fully warmed up and have all modules present.
     """
     device = model.device if isinstance(model, DDP) else next(model.parameters()).device
-    
     feature = batch["inputs"]
     # at entry, feature is (N, T, C)
     assert feature.ndim == 2 or feature.ndim == 3
     feature = feature.to(device)
 
     supervisions = batch["supervisions"]
-     
+
     if feature.ndim == 2:
         feature_lens = []
         for supervision in supervisions['cut']:
@@ -811,62 +794,39 @@ def compute_loss(
 
     elif feature.ndim == 3:
         feature_lens = supervisions["num_frames"].to(device)
-    
-    if "start_frame" not in supervisions:
-        supervisions["start_frame"] = supervisions["start_sample"]
-        supervisions["num_frames"] = supervisions["num_samples"]
 
     batch_idx_train = params.batch_idx_train
     warm_step = params.warm_step
 
     texts = batch["supervisions"]["text"]
-   
-    ### For LID
-    target_lang = []
-
-    for sup in batch["supervisions"]["cut"]:
-        lang = sup.supervisions[0].language
-        if lang == 'en':
-            target_lang.append(0)
-        elif lang == 'es':
-            target_lang.append(1)
-    
-    target_lang = torch.tensor(target_lang, dtype=torch.long)
-    ###
-
     token_ids = sp.encode(texts, out_type=int)
     y = k2.RaggedTensor(token_ids).to(device)
 
     with torch.set_grad_enabled(is_training):
-        simple_loss, pruned_loss, ctc_output, ce_loss = model(
+        simple_loss, pruned_loss, ctc_output = model(
             x=feature,
             x_lens=feature_lens,
             y=y,
             prune_range=params.prune_range,
             am_scale=params.am_scale,
             lm_scale=params.lm_scale,
-            target_lang=target_lang,
         )
-        
-        if params.lid:
-            loss = ce_loss
-        
-        else:
-            s = params.simple_loss_scale
-            # take down the scale on the simple loss from 1.0 at the start
-            # to params.simple_loss scale by warm_step.
-            simple_loss_scale = (
-                s
-                if batch_idx_train >= warm_step
-                else 1.0 - (batch_idx_train / warm_step) * (1.0 - s)
-            )
-            pruned_loss_scale = (
-                1.0
-                if batch_idx_train >= warm_step
-                else 0.1 + 0.9 * (batch_idx_train / warm_step)
-            )
 
-            loss = simple_loss_scale * simple_loss + pruned_loss_scale * pruned_loss
+        s = params.simple_loss_scale
+        # take down the scale on the simple loss from 1.0 at the start
+        # to params.simple_loss scale by warm_step.
+        simple_loss_scale = (
+            s
+            if batch_idx_train >= warm_step
+            else 1.0 - (batch_idx_train / warm_step) * (1.0 - s)
+        )
+        pruned_loss_scale = (
+            1.0
+            if batch_idx_train >= warm_step
+            else 0.1 + 0.9 * (batch_idx_train / warm_step)
+        )
+
+        loss = simple_loss_scale * simple_loss + pruned_loss_scale * pruned_loss
     
     info = MetricsTracker()
     
@@ -926,9 +886,8 @@ def compute_loss(
     # Note: We use reduction=sum while computing the loss.
     info["utterances"] = feature.size(0)
     info["loss"] = loss.detach().cpu().item()
-    if not params.lid:
-        info["simple_loss"] = simple_loss.detach().cpu().item()
-        info["pruned_loss"] = pruned_loss.detach().cpu().item()
+    info["simple_loss"] = simple_loss.detach().cpu().item()
+    info["pruned_loss"] = pruned_loss.detach().cpu().item()
 
     return loss, info
 
@@ -1195,7 +1154,6 @@ def train_one_epoch(
                 wb.log({"train/ctc_loss": loss_info["ctc_loss"]*numel})
 
 #if batch_idx % params.valid_interval == 0 and not params.print_diagnostics:
-    '''
     logging.info("Computing validation loss")
     valid_info = compute_validation_loss(
         params=params,
@@ -1220,7 +1178,7 @@ def train_one_epoch(
         wb.log({"valid/simple_loss": valid_info["simple_loss"]*numel})
         wb.log({"valid/pruned_loss": valid_info["pruned_loss"]*numel})
         wb.log({"valid/ctc_loss": valid_info["ctc_loss"]*numel})
-    '''
+
     loss_value = tot_loss["loss"] / tot_loss["utterances"]
     params.train_loss = loss_value
     if params.train_loss < params.best_train_loss:
@@ -1272,7 +1230,6 @@ def run(rank, world_size, args, wb=None):
 
     logging.info("About to create model")
     model = get_transducer_model(params)
-    logging.info(model)
 
     num_param = sum([p.numel() for p in model.parameters()])
     logging.info(f"Number of model parameters: {num_param}")
@@ -1338,17 +1295,13 @@ def run(rank, world_size, args, wb=None):
             [name_param_pair[0] for name_param_pair in model.named_parameters()]
         )
 
-        #for n in parameters_names:
-        #    print(n)
-        #exit()
-
         logging.info(f"len name = {len(parameters_names)}")
         logging.info(f"len param = {len(list(model.parameters()))}")
         
         optimizer = ScaledAdam(
             model.parameters(),
             lr=params.base_lr,
-            clipping_scale=5.0,
+            clipping_scale=2.0,
             parameters_names=parameters_names,
         )
 
@@ -1385,19 +1338,13 @@ def run(rank, world_size, args, wb=None):
 
     if params.inf_check:
         register_inf_check_hooks(model)
-    
-    if params.data_type == 'librispeech':
-        librispeech = LibriSpeechAsrDataModule(args)
 
-        train_cuts = librispeech.train_clean_100_cuts()
-        if params.full_libri:
-            train_cuts += librispeech.train_clean_360_cuts()
-            train_cuts += librispeech.train_other_500_cuts()
-    else:
-        commonvoice = CommonVoiceAsrDataModule(args)
-        
-        train_cuts = commonvoice.train_full_cuts()
-        #train_cuts += commonvoice.train_es_cuts()
+    librispeech = LibriSpeechAsrDataModule(args)
+
+    train_cuts = librispeech.train_clean_100_cuts()
+    if params.full_libri:
+        train_cuts += librispeech.train_clean_360_cuts()
+        train_cuts += librispeech.train_other_500_cuts()
 
     def remove_short_and_long_utt(c: Cut):
         # Keep only utterances with duration between 1 second and 20 seconds
@@ -1418,24 +1365,14 @@ def run(rank, world_size, args, wb=None):
         sampler_state_dict = checkpoints["sampler"]
     else:
         sampler_state_dict = None
-    
-    if params.data_type == 'librispeech':
-        train_dl = librispeech.train_dataloaders(
-            train_cuts, sampler_state_dict=sampler_state_dict
-        )
 
-        valid_cuts = librispeech.dev_clean_cuts()
-        valid_cuts += librispeech.dev_other_cuts()
-        valid_dl = librispeech.valid_dataloaders(valid_cuts)
-    else:
-        train_dl = commonvoice.train_dataloaders(
-            train_cuts, sampler_state_dict=sampler_state_dict
-        )
+    train_dl = librispeech.train_dataloaders(
+        train_cuts, sampler_state_dict=sampler_state_dict
+    )
 
-        valid_cuts = commonvoice.dev_full_cuts()
-        #valid_cuts += commonvoice.dev_es_cuts()
-        valid_dl = commonvoice.valid_dataloaders(valid_cuts)
-    
+    valid_cuts = librispeech.dev_clean_cuts()
+    valid_cuts += librispeech.dev_other_cuts()
+    valid_dl = librispeech.valid_dataloaders(valid_cuts)
     
     '''
     if not params.print_diagnostics:
@@ -1581,8 +1518,7 @@ def scan_pessimistic_batches_for_oom(
 
 def main():
     parser = get_parser()
-    #LibriSpeechAsrDataModule.add_arguments(parser)
-    CommonVoiceAsrDataModule.add_arguments(parser)
+    LibriSpeechAsrDataModule.add_arguments(parser)
     args = parser.parse_args()
     #args.exp_dir = args.exp_dir + str(random.randint(0,400))
     args.exp_dir = Path(args.exp_dir)
