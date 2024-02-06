@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import random
+
 from typing import Tuple
 import logging
 
@@ -40,7 +40,6 @@ class Transducer(nn.Module):
         decoder_dim: int,
         joiner_dim: int,
         vocab_size: int,
-        lid=False,
     ):
         """
         Args:
@@ -78,16 +77,6 @@ class Transducer(nn.Module):
             nn.LogSoftmax(dim=-1),
         )
 
-        if lid == True:
-            self.lid = True
-            self.lstm = nn.LSTM(512, 256, 1, batch_first=True)
-            self.lid_linear = nn.Linear(256, 2)
-            self.softmax = nn.Softmax(dim=1)
-            self.ce_loss = nn.CrossEntropyLoss(reduction='mean')
-
-        else:
-            self.lid = False
-
     def forward(
         self,
         x: torch.Tensor,
@@ -96,7 +85,6 @@ class Transducer(nn.Module):
         prune_range: int = 5,
         am_scale: float = 0.0,
         lm_scale: float = 0.0,
-        target_lang: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -132,48 +120,8 @@ class Transducer(nn.Module):
 
         assert x.size(0) == x_lens.size(0) == y.dim0
 
-        encoder_out, x_lens, cnn_out = self.encoder(x, x_lens)
-        #encoder_out, x_lens = self.encoder(x, x_lens)
+        encoder_out, x_lens = self.encoder(x, x_lens)
         assert torch.all(x_lens > 0)
-
-        #For LID
-        if self.lid == True:
-            cnn_out = cnn_out.transpose(1, 2)
-            output = self.lstm(cnn_out)
-            #print(output[0])
-            
-            # x_lens == olens
-            final = []
-            final = torch.tensor(final).to('cuda')
-            final = output[0][:, 100, :]
-            '''
-            for i in range(len(x_lens)):
-                new_output = output[0][i, x_lens[i]-1, :]
-                new_output = new_output.reshape(1, -1)
-                final = torch.cat((final, new_output), dim=0)
-            '''
-            lid_final = self.lid_linear(final)
-            lid_final = self.softmax(lid_final)
-            #lid_prob = self.softmax(lid_final)
-
-            # Compute CE Loss
-            ce_loss = self.ce_loss(lid_final, target_lang)
-            
-            #prob = lid_final.max(dim=1)[0]
-            #pred = lid_final.max(dim=1)[1]
-            num_corrects = (torch.max(lid_final, 1)[1].view(target_lang.size()).data == target_lang.data).float().sum()
-            acc = 100 * num_corrects / lid_final.size(0)
-            
-            if random.random() < 0.1:
-                logging.info(f'acc: {acc}')
-                '''
-                logging.info(prob)
-                logging.info(pred)
-                logging.info(target_lang)
-                logging.info(ce_loss)
-                '''
-        else:
-            ce_loss = None
 
         # compute ctc log-probs
         ctc_output = self.ctc_output(encoder_out)
@@ -248,7 +196,7 @@ class Transducer(nn.Module):
                 reduction="sum",
             )
 
-        return (simple_loss, pruned_loss, ctc_output, ce_loss)
+        return (simple_loss, pruned_loss, ctc_output)
 
     def decode(
         self,
@@ -259,8 +207,7 @@ class Transducer(nn.Module):
     ):
         from beam_search import greedy_search_batch
 
-        encoder_out, x_lens, cnn_out = self.encoder(x, x_lens)
-        #encoder_out, x_lens = self.encoder(x, x_lens)
+        encoder_out, x_lens = self.encoder(x, x_lens)
 
         hyps = []
         hyp_tokens = greedy_search_batch(self, encoder_out, x_lens)
