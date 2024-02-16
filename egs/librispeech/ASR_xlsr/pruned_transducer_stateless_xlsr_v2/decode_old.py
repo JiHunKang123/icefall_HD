@@ -48,7 +48,7 @@ import k2
 import sentencepiece as spm
 import torch
 import torch.nn as nn
-from asr_datamodule import LibriSpeechAsrDataModule, CommonVoiceAsrDataModule
+from asr_datamodule import LibriSpeechAsrDataModule
 from beam_search import (
     beam_search,
     fast_beam_search_nbest,
@@ -272,21 +272,6 @@ def get_parser():
         help="left context can be seen during decoding (in frames after subsampling)",
     )
 
-    ########## for CommonVoice #########
-    parser.add_argument(
-        "--decode-data-type",
-        type=str,
-        default='librispeech',
-        help="Type of dataset (e.g. librispeech or commonvoice)",
-    )
-
-    #parser.add_argument(
-    #    "--lid",
-    #    type=str2bool,
-    #    default=False,
-    #    help="To use language identification(True) or not(False)",
-    #)
-
     add_model_arguments(parser)
     add_rep_arguments(parser)
 
@@ -366,7 +351,7 @@ def decode_one_batch(
             simulate_streaming=True,
         )
     else:
-        encoder_out, encoder_out_lens, cnn_out = model.encoder(x=feature, x_lens=feature_lens)
+        encoder_out, encoder_out_lens = model.encoder(x=feature, x_lens=feature_lens)
 
     hyps = []
 
@@ -442,37 +427,6 @@ def decode_one_batch(
         )
         for hyp in sp.decode(hyp_tokens):
             hyps.append(hyp.split())
-    elif params.decoding_method == "lid" and params.max_sym_per_frame == 1:
-        cnn_out = cnn_out.transpose(1, 2)   #B, T, D
-        output = model.lstm(cnn_out)
-        
-        final = []
-        final = torch.tensor(final).to('cuda')
-        final = output[0][:, 100, :]
-
-        lid_final = model.lid_linear(final)
-        lid_final = model.softmax(lid_final)
-
-        #ref lid
-        target_lang = []
-
-        for sup in supervisions["cut"]:
-            lang = sup.supervisions[0].language
-            if lang == 'en':
-                target_lang.append(0)
-            elif lang == 'es':
-                target_lang.append(1)
-
-        target_lang = torch.tensor(target_lang, dtype=torch.long).to('cuda')
-
-        #Compute accuracy
-        num_corrects = (torch.max(lid_final, 1)[1].view(target_lang.size()).data == target_lang.data).float().sum()
-        acc = 100 * num_corrects / lid_final.size(0)
-        utt_num = lid_final.size(0)
-
-        return num_corrects, utt_num
-
-
     else:
         batch_size = encoder_out.size(0)
 
@@ -548,9 +502,6 @@ def decode_dataset(
       predicted result.
     """
     num_cuts = 0
-    
-    tot_utt = 0
-    tot_num_corrects = 0
 
     try:
         num_batches = len(dl)
@@ -566,7 +517,7 @@ def decode_dataset(
     for batch_idx, batch in enumerate(dl):
         texts = batch["supervisions"]["text"]
         cut_ids = [cut.id for cut in batch["supervisions"]["cut"]]
-        
+
         hyps_dict = decode_one_batch(
             params=params,
             model=model,
@@ -575,12 +526,7 @@ def decode_dataset(
             word_table=word_table,
             batch=batch,
         )
-        
-        if params.decoding_method == 'lid':
-            tot_num_corrects += int(hyps_dict[0])
-            tot_utt += hyps_dict[1]
-            print('calculating acc...', 100 * tot_num_corrects / tot_utt)
-            continue
+
         for name, hyps in hyps_dict.items():
             this_batch = []
             assert len(hyps) == len(texts)
@@ -646,13 +592,7 @@ def save_results(
 @torch.no_grad()
 def main():
     parser = get_parser()
-    '''
-    if params.decode_data_type == 'librispeech':
-        LibriSpeechAsrDataModule.add_arguments(parser)
-    else:
-        CommonVoiceAsrDataModule.add_arguments(parser)
-    '''
-    CommonVoiceAsrDataModule.add_arguments(parser)
+    LibriSpeechAsrDataModule.add_arguments(parser)
     args = parser.parse_args()
     args.exp_dir = Path(args.exp_dir)
 
@@ -667,7 +607,6 @@ def main():
         "fast_beam_search_nbest_LG",
         "fast_beam_search_nbest_oracle",
         "modified_beam_search",
-        "lid",
     )
     params.res_dir = params.exp_dir / params.decoding_method
 
@@ -830,36 +769,27 @@ def main():
 
     # we need cut ids to display recognition results.
     args.return_cuts = True
-
-    if params.decode_data_type == 'librispeech':
-        librispeech = LibriSpeechAsrDataModule(args)
+    librispeech = LibriSpeechAsrDataModule(args)
     
-        dev_clean_cuts = librispeech.dev_clean_cuts()
-        dev_other_cuts = librispeech.dev_other_cuts()
+    ########dev-clean, dev-other##########
+    dev_clean_cuts = librispeech.dev_clean_cuts()
+    dev_other_cuts = librispeech.dev_other_cuts()
 
-        dev_clean_dl = librispeech.test_dataloaders(dev_clean_cuts)
-        dev_other_dl = librispeech.test_dataloaders(dev_other_cuts)
+    dev_clean_dl = librispeech.test_dataloaders(dev_clean_cuts)
+    dev_other_dl = librispeech.test_dataloaders(dev_other_cuts)
+    #######################################
 
-        test_clean_cuts = librispeech.test_clean_cuts()
-        test_other_cuts = librispeech.test_other_cuts()
+    test_clean_cuts = librispeech.test_clean_cuts()
+    test_other_cuts = librispeech.test_other_cuts()
 
-        test_clean_dl = librispeech.test_dataloaders(test_clean_cuts)
-        test_other_dl = librispeech.test_dataloaders(test_other_cuts)
-        
-        test_sets = ["dev-clean", "dev-other", "test-clean", "test-other"]
-        test_dl = [dev_clean_dl, dev_other_dl, test_clean_dl, test_other_dl]
-
-    else:
-        commonvoice = CommonVoiceAsrDataModule(args)
-
-        dev_cuts = commonvoice.dev_full_cuts()
-        test_cuts = commonvoice.test_full_cuts()
-
-        dev_dl = commonvoice.valid_dataloaders(dev_cuts)
-        test_dl = commonvoice.test_dataloaders(test_cuts)
-
-        test_sets = ["dev", "test"]
-        test_dl = [dev_dl, test_dl]
+    test_clean_dl = librispeech.test_dataloaders(test_clean_cuts)
+    test_other_dl = librispeech.test_dataloaders(test_other_cuts)
+    
+    #test_sets = ["test-clean", "test-other"]
+    #test_dl = [test_clean_dl, test_other_dl]
+    
+    test_sets = ["dev-clean", "dev-other", "test-clean", "test-other"]
+    test_dl = [dev_clean_dl, dev_other_dl, test_clean_dl, test_other_dl]
 
     for test_set, test_dl in zip(test_sets, test_dl):
         results_dict = decode_dataset(
