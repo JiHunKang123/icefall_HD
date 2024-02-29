@@ -870,14 +870,20 @@ def main():
             word_table=word_table,
             decoding_graph=decoding_graph,
         )
+        
+        if params.decoding_method == "lid":
+            logging.info("Done!")
 
-        save_results(
-            params=params,
-            test_set_name=test_set,
-            results_dict=results_dict,
-        )
+        else:
+            save_results(
+                params=params,
+                test_set_name=test_set,
+                results_dict=results_dict,
+            )
 
-    logging.info("Done!")
+            logging.info("Done!")
+
+    #logging.info("Done!")
 
 
 if __name__ == "__main__":
