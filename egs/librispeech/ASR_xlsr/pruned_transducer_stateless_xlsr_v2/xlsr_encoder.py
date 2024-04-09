@@ -277,7 +277,7 @@ class MultiXLSREncoder(EncoderInterface):
 
     def reload_pretrained_parameters(self):
         self.encoders.load_state_dict(self.pretrained_params)
-        logging.info("Pretrained data2vec model parameters reloaded!")
+        logging.info("Pretrained XLS-R model parameters reloaded!")
 
 
 def download_xlsr(model_url='https://dl.fbaipublicfiles.com/fairseq/wav2vec/xlsr2_300m.pt', dir_path='./models'):
@@ -304,12 +304,6 @@ def download_xlsr(model_url='https://dl.fbaipublicfiles.com/fairseq/wav2vec/xlsr
 if __name__ == '__main__':
     d2v = FairSeqData2VecEncoder(input_size=768, w2v_url='ww', output_size=768)
     inputs = torch.randn([1, 211564])
-    #a = torch.ones([1000]
-    #b = torch.ones([10000])
-    #c = torch.ones([10000])
     length = torch.tensor([211564])
     outputs = d2v(inputs, length)
     print(outputs[0].size())
-
-    #for n, p in d2v.named_parameters():
-    #    print(n)

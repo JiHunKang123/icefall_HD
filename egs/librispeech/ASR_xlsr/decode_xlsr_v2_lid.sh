@@ -15,5 +15,4 @@ for method in lid; do
 	  --decode-data-type commonvoice \
 	  --lid True \
 	  --bpe-model data/en/lang_bpe_500/bpe.model
-	  #--exp-dir ./pruned_transducer_stateless_xlsr_v2/xlsr_lid_eql_2sec_60epoch \
 done

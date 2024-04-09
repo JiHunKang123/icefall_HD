@@ -863,7 +863,6 @@ def main():
 
     logging.info("About to create model")
     model = get_transducer_model(params)
-    #print(dir(model.encoder))
 
     if params.model_name and params.language_num == 1:
         load_checkpoint(f"{params.exp_dir}/{params.model_name}", model)
@@ -875,11 +874,9 @@ def main():
             if 'lstm' in n or 'lid' in n:
                 p.data = lid_model[n]
 
-        ##TODO: 모델 로드, 파라미터 덮어씌우기
         ##### en model #####
         en_model = f"{params.exp_dir}/{model_names[1]}"
         en_model = torch.load(en_model)['model']
-        #print(en_model.keys())
         # encoder
         for n, p in model.encoder.encoders[0].named_parameters():
             p.data = en_model[f"encoder.encoders.{n}"]
@@ -1075,7 +1072,6 @@ def main():
 
         if params.lid == True:
             dev_cuts = commonvoice.dev_full_cuts()
-            #dev_cuts = commonvoice.dev_en_cuts()
             test_cuts = commonvoice.test_full_cuts()
 
         else:
@@ -1091,9 +1087,6 @@ def main():
         
         dev_dl = commonvoice.test_dataloaders(dev_cuts)
         test_dl = commonvoice.test_dataloaders(test_cuts)
-
-        #test_sets = ["dev"]
-        #test_dl = [dev_dl]
 
         test_sets = ["dev", "test"]
         test_dl = [dev_dl, test_dl]
@@ -1128,7 +1121,6 @@ def main():
             )
 
             logging.info("Done!")
-    #logging.info("Done!")
 
 
 if __name__ == "__main__":

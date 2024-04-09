@@ -17,7 +17,5 @@ for lang in "en"; do
 		    --lid False \
 		    --lang-type $lang \
 		    --bpe-model data/$lang/lang_bpe_500/bpe.model
-		    #--exp-dir ./pruned_transducer_stateless_xlsr_v2/xlsr_lid_eql_2sec_60epoch \
-		    #--exp-dir /workspace/icefall_hd/egs/librispeech/ASR/pruned_transducer_stateless_xlsr_v2/$lang \
 	done
 done

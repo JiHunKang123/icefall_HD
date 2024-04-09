@@ -69,11 +69,6 @@ class Transducer(nn.Module):
         self.decoder = decoder
         self.joiner = joiner
 
-        #self.simple_am_proj = nn.Linear(
-        #    encoder_dim,
-        #    vocab_size,
-        #)
-        
         if language_num == 1:
             self.simple_am_proj = ScaledLinear(
                 encoder_dim,
@@ -115,9 +110,6 @@ class Transducer(nn.Module):
         am_scale: float = 0.0,
         lm_scale: float = 0.0,
         target_lang: torch.Tensor = None,
-        #target_en,
-        #target_es,
-        #target_ko,
    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -153,29 +145,22 @@ class Transducer(nn.Module):
 
         assert x.size(0) == x_lens.size(0) == y.dim0
 
-        # arg 추가해서 짜주기 #
         if self.language_num == 1:
             encoder_out, x_lens, cnn_out = self.encoder(x, x_lens)
         else:
             encoder_out, x_lens, cnn_out = self.encoder(x, x_lens, self.lstm, self.lid_linear, self.softmax)
-        #encoder_out, x_lens, cnn_out = self.encoder(x, x_lens)
-        #encoder_out, x_lens = self.encoder(x, x_lens)
+        
         assert torch.all(x_lens > 0)
 
         #For LID
         if self.lid == True:
             cnn_out = cnn_out.transpose(1, 2)
             output = self.lstm(cnn_out)
-            #print(output[0])
             
             # x_lens == olens
             final = []
             final = torch.tensor(final).to('cuda')
             
-            # for 2 seconds lid
-            #final = output[0][:, 100, :]
-
-            # for all seconds lid
             for i in range(len(x_lens)):
                 new_output = output[0][i, x_lens[i]-1, :]
                 new_output = new_output.reshape(1, -1)
@@ -183,66 +168,15 @@ class Transducer(nn.Module):
 
             lid_final = self.lid_linear(final)
             lid_final = self.softmax(lid_final)
-            #lid_prob = self.softmax(lid_final)
             
             ### Compute CE Loss
             ce_loss = self.ce_loss(lid_final, target_lang)
-            #prob = lid_final.max(dim=1)[0]
-            #pred = lid_final.max(dim=1)[1]
 
-            ### Compute CE Loss per language
-            """
-            new_tar_en, new_tar_es, new_tar_ko = 0, 0, 0
-            
-            if target_ko == 0:
-                multiples = target_en * target_es
-            if target_en == 0:
-                multiples = target_es * target_ko
-            if target_es == 0:
-                multiples = target_en * target_ko
-            if target_ko == 0 and target_es == 0:
-                multiples = target_en
-            if target_en == 0 and target_es == 0:
-                multiples = target_ko
-            if target_ko == 0 and target_en == 0:
-                multiples = target_es
-            if target_ko != 0 and target_en != 0 and target_es != 0:
-                multiples = target_en * target_es * target_ko
-           
-            try: new_tar_en = multiples / target_en
-            except: new_tar_en = 0
-            try: new_tar_es = multiples / target_es
-            except: new_tar_es = 0
-            try: new_tar_ko = multiples / target_ko
-            except: new_tar_ko = 0
-            
-            denom = new_tar_en + new_tar_es + new_tar_ko
-           
-            ratio_en = new_tar_en / denom
-            ratio_es = new_tar_es / denom
-            ratio_ko = new_tar_ko / denom
-            
-            for i, t_ln in enumerate(target_lang):
-                if t_ln == 0:
-                    ce_loss[i] = ce_loss[i] * ratio_en
-                elif t_ln == 1:
-                    ce_loss[i] = ce_loss[i] * ratio_es
-                elif t_ln == 2:
-                    ce_loss[i] = ce_loss[i] * ratio_ko
-
-            ce_loss = sum(ce_loss) / len(ce_loss)
-            """
             num_corrects = (torch.max(lid_final, 1)[1].view(target_lang.size()).data == target_lang.data).float().sum()
             acc = 100 * num_corrects / lid_final.size(0)
             
             if random.random() < 0.1:
                 logging.info(f'acc: {acc}')
-                '''
-                logging.info(prob)
-                logging.info(pred)
-                logging.info(target_lang)
-                logging.info(ce_loss)
-                '''
         else:
             ce_loss = None
 
@@ -331,7 +265,6 @@ class Transducer(nn.Module):
         from beam_search import greedy_search_batch
 
         encoder_out, x_lens, cnn_out = self.encoder(x, x_lens)
-        #encoder_out, x_lens = self.encoder(x, x_lens)
 
         hyps = []
         hyp_tokens = greedy_search_batch(self, encoder_out, x_lens)

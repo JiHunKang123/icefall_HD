@@ -866,9 +866,6 @@ def compute_loss(
             am_scale=params.am_scale,
             lm_scale=params.lm_scale,
             target_lang=target_lang,
-            #target_en=target_en,
-            #target_es=target_es,
-            #target_ko=target_ko,
         )
         
         if params.lid:
@@ -1360,10 +1357,6 @@ def run(rank, world_size, args, wb=None):
         parameters_names.append(
             [name_param_pair[0] for name_param_pair in model.named_parameters()]
         )
-
-        #for n in parameters_names:
-        #    print(n)
-        #exit()
 
         logging.info(f"len name = {len(parameters_names)}")
         logging.info(f"len param = {len(list(model.parameters()))}")

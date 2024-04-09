@@ -902,9 +902,6 @@ def compute_loss(
             am_scale=params.am_scale,
             lm_scale=params.lm_scale,
             target_lang=target_lang,
-            #target_en=target_en,
-            #target_es=target_es,
-            #target_ko=target_ko,
         )
         
         if params.lid:
@@ -1397,10 +1394,6 @@ def run(rank, world_size, args, wb=None):
             [name_param_pair[0] for name_param_pair in model.named_parameters()]
         )
 
-        #for n in parameters_names:
-        #    print(n)
-        #exit()
-
         logging.info(f"len name = {len(parameters_names)}")
         logging.info(f"len param = {len(list(model.parameters()))}")
         
@@ -1663,7 +1656,6 @@ def main():
     args.exp_dir = Path(args.exp_dir)
 
     logging.info("save arguments to config.yaml...")
-    #save_args(args)
 
     # for wandb
     if args.wandb: wb = wandb.init(project="", entity="", config=vars(args))

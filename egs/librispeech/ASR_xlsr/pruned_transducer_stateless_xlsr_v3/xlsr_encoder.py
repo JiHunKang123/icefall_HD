@@ -149,7 +149,7 @@ class XLSREncoder(EncoderInterface):
 
     def reload_pretrained_parameters(self):
         self.encoders.load_state_dict(self.pretrained_params)
-        logging.info("Pretrained data2vec model parameters reloaded!")
+        logging.info("Pretrained XLS-R model parameters reloaded!")
 
 
 class MultiXLSREncoder(EncoderInterface):
@@ -178,12 +178,6 @@ class MultiXLSREncoder(EncoderInterface):
         #assert check_argument_types()
         super().__init__()
                     
-        '''
-        if os.path.exists('/home/work/workspace/models/data2vec_model/audio_base_ls.pt'):
-            self.w2v_model_path = '/home/work/workspace/models/data2vec_model/audio_base_ls.pt'
-        if os.path.exists('/workspace/models/audio_base_ls.pt'):
-            self.w2v_model_path = '/workspace/models/audio_base_ls.pt'
-        '''
         self.w2v_model_path = download_xlsr()
         self._output_size = output_size
 
@@ -311,17 +305,6 @@ class MultiXLSREncoder(EncoderInterface):
         
         xs_pad = xs_pad_new
         
-        '''
-        for i, lid in enumerate(max_lid):
-            ctc_res = ctc_output[lid](xs_pad[i].unsqueeze(0))
-            ctc_res = softmax(ctc_res)
-            ctc_prob, ctc_idx = ctc_res.max(-1)
-            ctc_prob = ctc_prob[ctc_idx!=0]
-        '''
-        #if lstm == None:
-        #    return xs_pad, olens, cnn_outputs
-        #else:
-        #    return xs_pad, olens, max_lid
         return xs_pad, olens, cnn_outputs if lstm == None else max_lid
 
     def reload_pretrained_parameters(self):
@@ -353,12 +336,6 @@ def download_xlsr(model_url='https://dl.fbaipublicfiles.com/fairseq/wav2vec/xlsr
 if __name__ == '__main__':
     d2v = FairSeqData2VecEncoder(input_size=768, w2v_url='ww', output_size=768)
     inputs = torch.randn([1, 211564])
-    #a = torch.ones([1000]
-    #b = torch.ones([10000])
-    #c = torch.ones([10000])
     length = torch.tensor([211564])
     outputs = d2v(inputs, length)
     print(outputs[0].size())
-
-    #for n, p in d2v.named_parameters():
-    #    print(n)

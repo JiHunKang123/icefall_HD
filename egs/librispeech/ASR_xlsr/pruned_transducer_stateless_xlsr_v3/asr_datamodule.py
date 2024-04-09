@@ -1009,7 +1009,6 @@ class CommonVoiceAsrDataModule:
     def train_full_cuts(self) -> CutSet:
         logging.info("About to get train-full cuts")
         return load_manifest_lazy(
-            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_train.jsonl.gz"
             self.args.cv_manifest_dir / "../../full/fbank/cv-full_cuts_train.jsonl.gz"
         )
 
@@ -1017,7 +1016,6 @@ class CommonVoiceAsrDataModule:
     def train_en_cuts(self) -> CutSet:
         logging.info("About to get train-en cuts")
         return load_manifest_lazy(
-            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_train.jsonl.gz"
             self.args.cv_manifest_dir / "../../en/fbank/cv-en_cuts_train.jsonl.gz"
         )
 
@@ -1041,7 +1039,6 @@ class CommonVoiceAsrDataModule:
     def dev_full_cuts(self) -> CutSet:
         logging.info("About to get dev-full cuts")
         return load_manifest_lazy(
-            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_dev.jsonl.gz"
             self.args.cv_manifest_dir / f"../../full/fbank/cv-full_cuts_dev.jsonl.gz"
         )
 
@@ -1049,7 +1046,6 @@ class CommonVoiceAsrDataModule:
     def dev_en_cuts(self) -> CutSet:
         logging.info("About to get dev-en cuts")
         return load_manifest_lazy(
-            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_dev.jsonl.gz"
             self.args.cv_manifest_dir / f"../../en/fbank/cv-en_cuts_dev.jsonl.gz"
         )
 
@@ -1064,7 +1060,6 @@ class CommonVoiceAsrDataModule:
     def dev_ko_cuts(self) -> CutSet:
         logging.info("About to get dev-ko cuts")
         return load_manifest_lazy(
-            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_dev.jsonl.gz"
             self.args.cv_manifest_dir / f"../../full/fbank/hd100_grap_cuts_dev-clean.jsonl.gz"
         )
 
@@ -1093,6 +1088,5 @@ class CommonVoiceAsrDataModule:
     def test_ko_cuts(self) -> CutSet:
         logging.info("About to get test-ko cuts")
         return load_manifest_lazy(
-            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_dev.jsonl.gz"
             self.args.cv_manifest_dir / f"../../full/fbank/hd100_grap_cuts_test-clean.jsonl.gz"
         )

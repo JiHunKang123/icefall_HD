@@ -921,9 +921,6 @@ def main():
         dev_dl = commonvoice.test_dataloaders(dev_cuts)
         test_dl = commonvoice.test_dataloaders(test_cuts)
 
-        #test_sets = ["dev"]
-        #test_dl = [dev_dl]
-
         test_sets = ["dev", "test"]
         test_dl = [dev_dl, test_dl]
 
@@ -948,7 +945,6 @@ def main():
             )
 
             logging.info("Done!")
-    #logging.info("Done!")
 
 
 if __name__ == "__main__":
