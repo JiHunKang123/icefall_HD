@@ -101,7 +101,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from zipformer import Zipformer
 #from data2vec_encoder import FairSeqData2VecEncoder
-from xlsr_encoder import XLSREncoder
+from xlsr_encoder import XLSREncoder, MultiXLSREncoder
 
 from icefall import diagnostics
 from icefall.checkpoint import remove_checkpoints
@@ -221,7 +221,13 @@ def add_rep_arguments(parser: argparse.ArgumentParser):
         default=False,
         help="To use language identification(True) or not(False)"
     )
-        
+    parser.add_argument(
+        "--language-num",
+        type=int,
+        default=1,
+        help="Language num"
+    )
+   
 
 def add_model_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
@@ -592,7 +598,7 @@ def get_encoder_model(params: AttributeDict) -> nn.Module:
     def to_int_tuple(s: str):
         return tuple(map(int, s.split(",")))
     
-    if params.encoder_type == 'xlsr':
+    if params.encoder_type == 'xlsr' and params.language_num == 1:
         encoder = XLSREncoder(
                     input_size=params.encoder_dim,
                     w2v_url='None',
@@ -600,6 +606,17 @@ def get_encoder_model(params: AttributeDict) -> nn.Module:
                     freeze_finetune_updates=params.freeze_finetune_updates,
                     additional_block=params.additional_block,
                 ) 
+
+    elif params.encoder_type == 'xlsr' and params.language_num > 1:
+        encoder = MultiXLSREncoder(
+                    input_size=params.encoder_dim,
+                    w2v_url='None',
+                    output_size=params.encoder_dim,
+                    freeze_finetune_updates=params.freeze_finetune_updates,
+                    additional_block=params.additional_block,
+                    language_num=params.language_num,
+                ) 
+
     else:
         encoder = Zipformer(
             num_features=params.feature_dim,
@@ -620,22 +637,40 @@ def get_encoder_model(params: AttributeDict) -> nn.Module:
 
 
 def get_decoder_model(params: AttributeDict) -> nn.Module:
-    decoder = Decoder(
-        vocab_size=params.vocab_size,
-        decoder_dim=params.decoder_dim,
-        blank_id=params.blank_id,
-        context_size=params.context_size,
-    )
+    if params.language_num == 1:
+        decoder = Decoder(
+            vocab_size=params.vocab_size,
+            decoder_dim=params.decoder_dim,
+            blank_id=params.blank_id,
+            context_size=params.context_size,
+        )
+    else:
+        decoder = [Decoder(
+            vocab_size=params.vocab_size[i],
+            decoder_dim=params.decoder_dim,
+            blank_id=params.blank_id[i],
+            context_size=params.context_size,
+        )
+            for i in range(params.language_num)]
     return decoder
 
 
 def get_joiner_model(params: AttributeDict) -> nn.Module:
-    joiner = Joiner(
-        encoder_dim=params.encoder_dim if params.encoder_type == 'xlsr' else int(params.encoder_dims.split(",")[-1]),
-        decoder_dim=params.decoder_dim,
-        joiner_dim=params.joiner_dim,
-        vocab_size=params.vocab_size,
-    )
+    if params.language_num == 1:
+        joiner = Joiner(
+            encoder_dim=params.encoder_dim if params.encoder_type == 'xlsr' else int(params.encoder_dims.split(",")[-1]),
+            decoder_dim=params.decoder_dim,
+            joiner_dim=params.joiner_dim,
+            vocab_size=params.vocab_size,
+        )
+    else:
+        joiner = [Joiner(
+            encoder_dim=params.encoder_dim if params.encoder_type == 'xlsr' else int(params.encoder_dims.split(",")[-1]),
+            decoder_dim=params.decoder_dim,
+            joiner_dim=params.joiner_dim,
+            vocab_size=params.vocab_size[i],
+        )
+            for i in range(params.language_num)]
     return joiner
 
 
@@ -648,11 +683,12 @@ def get_transducer_model(params: AttributeDict) -> nn.Module:
         encoder=encoder,
         decoder=decoder,
         joiner=joiner,
-        encoder_dim=params.encoder_dim if params.encoder_type == 'xlsr' else int(params.encoder_dims.split(",")[-1]),
+        encoder_dim=params.encoder_dim if 'xlsr' in params.encoder_type else int(params.encoder_dims.split(",")[-1]),
         decoder_dim=params.decoder_dim,
         joiner_dim=params.joiner_dim,
         vocab_size=params.vocab_size,
         lid=params.lid,
+        language_num = params.language_num,
     )
     return model
 

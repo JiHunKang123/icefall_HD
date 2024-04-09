@@ -48,7 +48,7 @@ import k2
 import sentencepiece as spm
 import torch
 import torch.nn as nn
-from asr_datamodule import LibriSpeechAsrDataModule, CommonVoiceAsrDataModule
+from asr_datamodule import LibriSpeechAsrDataModule, UserLibriAsrDataModule
 from beam_search import (
     beam_search,
     fast_beam_search_nbest,
@@ -272,21 +272,6 @@ def get_parser():
         help="left context can be seen during decoding (in frames after subsampling)",
     )
 
-    ########## for CommonVoice #########
-    parser.add_argument(
-        "--decode-data-type",
-        type=str,
-        default='librispeech',
-        help="Type of dataset (e.g. librispeech or commonvoice)",
-    )
-
-    parser.add_argument(
-        "--lang-type",
-        type=str,
-        default="en",
-        help="To fine-tune XLSR with multilingual data(e.g. en, es, ko)",
-    )
-
     add_model_arguments(parser)
     add_rep_arguments(parser)
 
@@ -366,7 +351,7 @@ def decode_one_batch(
             simulate_streaming=True,
         )
     else:
-        encoder_out, encoder_out_lens, cnn_out = model.encoder(x=feature, x_lens=feature_lens)
+        encoder_out, encoder_out_lens = model.encoder(x=feature, x_lens=feature_lens)
 
     hyps = []
 
@@ -425,7 +410,7 @@ def decode_one_batch(
         )
         for hyp in sp.decode(hyp_tokens):
             hyps.append(hyp.split())
-    elif params.decoding_method == "greedy_search_batch" and params.max_sym_per_frame == 1:
+    elif params.decoding_method == "greedy_search" and params.max_sym_per_frame == 1:
         hyp_tokens = greedy_search_batch(
             model=model,
             encoder_out=encoder_out,
@@ -442,70 +427,6 @@ def decode_one_batch(
         )
         for hyp in sp.decode(hyp_tokens):
             hyps.append(hyp.split())
-    elif params.decoding_method == "lid" and params.max_sym_per_frame == 1:
-        cnn_out = cnn_out.transpose(1, 2)   #B, T, D
-        output = model.lstm(cnn_out)
-        
-        final = []
-        final = torch.tensor(final).to('cuda')
-
-        # for 2 seconds lid
-        #final = output[0][:, 100, :]
-        
-        # for all seconds lid
-        for i in range(len(encoder_out_lens)):
-            new_output = output[0][i, encoder_out_lens[i]-1, :]
-            new_output = new_output.reshape(1, -1)
-            final = torch.cat((final, new_output), dim=0)
-        
-        lid_final = model.lid_linear(final)
-        lid_final = model.softmax(lid_final)
-        
-        #ref lid
-        target_lang = []
-        target_en, target_es, target_ko = 0, 0, 0
-        hyp_en, hyp_es, hyp_ko = 0, 0, 0
-        lang = ''
-
-        for sup in supervisions["cut"]:
-            if sup.supervisions[0].language == None:
-                lang = "ko"
-            else:
-                lang = sup.supervisions[0].language
-            if lang == 'en':
-                target_lang.append(0)
-                target_en += 1
-            elif lang == 'es':
-                target_lang.append(1)
-                target_es += 1
-            elif lang == 'ko':
-                target_lang.append(2)
-                target_ko += 1
-
-        target_lang = torch.tensor(target_lang, dtype=torch.long).to('cuda')
-        hyp_lang = torch.max(lid_final, 1)[1]
-        print(target_lang)
-        print(hyp_lang)
-        
-        ### Accuracy per language ###
-        for i, hyp in enumerate(hyp_lang):
-            if target_lang[i] == hyp:
-                if hyp == 0:
-                    hyp_en += 1
-                elif hyp == 1:
-                    hyp_es += 1
-                elif hyp == 2:
-                    hyp_ko += 1
-        #############################
-
-        #Compute accuracy
-        num_corrects = (torch.max(lid_final, 1)[1].view(target_lang.size()).data == target_lang.data).float().sum()
-        acc = 100 * num_corrects / lid_final.size(0)
-        utt_num = lid_final.size(0)
-
-        return num_corrects, utt_num, target_en, target_es, target_ko, hyp_en, hyp_es, hyp_ko
-
-
     else:
         batch_size = encoder_out.size(0)
 
@@ -581,11 +502,6 @@ def decode_dataset(
       predicted result.
     """
     num_cuts = 0
-    
-    tot_utt = 0
-    tot_num_corrects = 0
-    tot_en_utt, tot_es_utt, tot_ko_utt = 0, 0, 0
-    tot_en_corrects, tot_es_corrects, tot_ko_corrects = 0, 0, 0
 
     try:
         num_batches = len(dl)
@@ -601,7 +517,7 @@ def decode_dataset(
     for batch_idx, batch in enumerate(dl):
         texts = batch["supervisions"]["text"]
         cut_ids = [cut.id for cut in batch["supervisions"]["cut"]]
-        
+
         hyps_dict = decode_one_batch(
             params=params,
             model=model,
@@ -610,32 +526,11 @@ def decode_dataset(
             word_table=word_table,
             batch=batch,
         )
-        
-        if params.decoding_method == 'lid':
-            tot_num_corrects += int(hyps_dict[0])
-            tot_utt += hyps_dict[1]
-            tot_en_utt += int(hyps_dict[2])
-            tot_es_utt += int(hyps_dict[3])
-            tot_ko_utt += int(hyps_dict[4])
-            tot_en_corrects += int(hyps_dict[5])
-            tot_es_corrects += int(hyps_dict[6])
-            tot_ko_corrects += int(hyps_dict[7])
-            
-            if tot_en_utt != 0:
-                print('calculating en acc...', 100 * tot_en_corrects / tot_en_utt)
-            if tot_es_utt != 0:
-                print('calculating es acc...', 100 * tot_es_corrects / tot_es_utt)
-            if tot_ko_utt != 0:
-                print('calculating ko acc...', 100 * tot_ko_corrects / tot_ko_utt)
-            print('calculating total acc...', 100 * tot_num_corrects / tot_utt)
-            continue
+
         for name, hyps in hyps_dict.items():
             this_batch = []
             assert len(hyps) == len(texts)
             for cut_id, hyp_words, ref_text in zip(cut_ids, hyps, texts):
-                print("hyp: ", ' '.join(hyp_words))
-                print("ref: ", ref_text)
-                print('')
                 ref_words = ref_text.split()
                 this_batch.append((cut_id, ref_words, hyp_words))
 
@@ -697,13 +592,7 @@ def save_results(
 @torch.no_grad()
 def main():
     parser = get_parser()
-    '''
-    if params.decode_data_type == 'librispeech':
-        LibriSpeechAsrDataModule.add_arguments(parser)
-    else:
-        CommonVoiceAsrDataModule.add_arguments(parser)
-    '''
-    CommonVoiceAsrDataModule.add_arguments(parser)
+    LibriSpeechAsrDataModule.add_arguments(parser)
     args = parser.parse_args()
     args.exp_dir = Path(args.exp_dir)
 
@@ -718,7 +607,6 @@ def main():
         "fast_beam_search_nbest_LG",
         "fast_beam_search_nbest_oracle",
         "modified_beam_search",
-        "lid",
     )
     params.res_dir = params.exp_dir / params.decoding_method
 
@@ -881,51 +769,20 @@ def main():
 
     # we need cut ids to display recognition results.
     args.return_cuts = True
+    userlibri = UserLibriAsrDataModule(args)
 
-    if params.decode_data_type == 'librispeech':
-        librispeech = LibriSpeechAsrDataModule(args)
-    
-        dev_clean_cuts = librispeech.dev_clean_cuts()
-        dev_other_cuts = librispeech.dev_other_cuts()
+    speaker_wise_cuts, speakers = userlibri.speaker_wise_cuts()
+    book_wise_cuts, books = userlibri.book_wise_cuts()
 
-        dev_clean_dl = librispeech.test_dataloaders(dev_clean_cuts)
-        dev_other_dl = librispeech.test_dataloaders(dev_other_cuts)
+    speaker_dl = []
+    book_dl = []
+    for speaker_wise_cut in speaker_wise_cuts:
+        speaker_dl.append(userlibri.test_dataloaders(speaker_wise_cut))
+    for book_wise_cut in book_wise_cuts:
+        book_dl.append(userlibri.test_dataloaders(book_wise_cut))
 
-        test_clean_cuts = librispeech.test_clean_cuts()
-        test_other_cuts = librispeech.test_other_cuts()
-
-        test_clean_dl = librispeech.test_dataloaders(test_clean_cuts)
-        test_other_dl = librispeech.test_dataloaders(test_other_cuts)
-        
-        test_sets = ["dev-clean", "dev-other", "test-clean", "test-other"]
-        test_dl = [dev_clean_dl, dev_other_dl, test_clean_dl, test_other_dl]
-
-    else:
-        commonvoice = CommonVoiceAsrDataModule(args)
-
-        if params.lid == True:
-            dev_cuts = commonvoice.dev_full_cuts()
-            test_cuts = commonvoice.test_full_cuts()
-
-        else:
-            if params.lang_type == 'en':
-                dev_cuts = commonvoice.dev_en_cuts()
-                test_cuts = commonvoice.test_en_cuts()
-            elif params.lang_type == 'es':
-                dev_cuts = commonvoice.dev_es_cuts()
-                test_cuts = commonvoice.test_es_cuts()
-            elif params.lang_type == 'ko':
-                dev_cuts = commonvoice.dev_ko_cuts()
-                test_cuts = commonvoice.test_ko_cuts()
-        
-        dev_dl = commonvoice.test_dataloaders(dev_cuts)
-        test_dl = commonvoice.test_dataloaders(test_cuts)
-
-        #test_sets = ["dev"]
-        #test_dl = [dev_dl]
-
-        test_sets = ["dev", "test"]
-        test_dl = [dev_dl, test_dl]
+    test_sets = speakers + books
+    test_dl = speaker_dl + book_dl
 
     for test_set, test_dl in zip(test_sets, test_dl):
         results_dict = decode_dataset(
@@ -936,19 +793,14 @@ def main():
             word_table=word_table,
             decoding_graph=decoding_graph,
         )
-        
-        if params.decoding_method == "lid":
-            logging.info("Done!")
-        
-        else:
-            save_results(
-                params=params,
-                test_set_name=test_set,
-                results_dict=results_dict,
-            )
 
-            logging.info("Done!")
-    #logging.info("Done!")
+        save_results(
+            params=params,
+            test_set_name=test_set,
+            results_dict=results_dict,
+        )
+
+    logging.info("Done!")
 
 
 if __name__ == "__main__":

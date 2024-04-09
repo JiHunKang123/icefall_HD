@@ -909,7 +909,8 @@ class CommonVoiceAsrDataModule:
             logging.info("Using SimpleCutSampler.")
             train_sampler = SimpleCutSampler(
                 cuts_train,
-                max_duration=self.args.max_duration,
+                #max_duration=self.args.max_duration,
+                max_cuts=1,
                 shuffle=self.args.shuffle,
             )
         logging.info("About to create train dataloader")
@@ -980,16 +981,18 @@ class CommonVoiceAsrDataModule:
             else eval(self.args.input_strategy)(),
             return_cuts=self.args.return_cuts,
         )
-        '''
-        sampler = DynamicBucketingSampler(
-            cuts,
-            max_duration=self.args.max_duration,
-            shuffle=False,
-        )
-        '''
-        sampler = SimpleCutSampler(
+        if self.args.bucketing_sampler:
+            sampler = DynamicBucketingSampler(
                 cuts,
-                max_cuts=16,
+                max_duration=self.args.max_duration,
+                shuffle=False,
+            )
+        else:
+            logging.info("Using SimpleCutSampler.")
+            sampler = SimpleCutSampler(
+                cuts,
+                max_cuts=1,
+                #max_duration=self.args.max_duration,
                 shuffle=False,
             )
 
@@ -1030,7 +1033,7 @@ class CommonVoiceAsrDataModule:
     def train_ko_cuts(self) -> CutSet:
           logging.info("About to get train-ko cuts")
           return load_manifest_lazy(
-              self.args.cv_manifest_dir / "../../ko/fbank/hd100_cuts_train-clean-100.jsonl.gz"
+              self.args.cv_manifest_dir / "../../full/fbank/hd100_grap_cuts_train-clean-100.jsonl.gz"
           ) 
 
 
@@ -1057,6 +1060,13 @@ class CommonVoiceAsrDataModule:
             self.args.cv_manifest_dir / f"../../es/fbank/cv-es_cuts_dev.jsonl.gz"
         )
 
+    @lru_cache()
+    def dev_ko_cuts(self) -> CutSet:
+        logging.info("About to get dev-ko cuts")
+        return load_manifest_lazy(
+            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_dev.jsonl.gz"
+            self.args.cv_manifest_dir / f"../../full/fbank/hd100_grap_cuts_dev-clean.jsonl.gz"
+        )
 
     @lru_cache()
     def test_full_cuts(self) -> CutSet:
@@ -1072,10 +1082,17 @@ class CommonVoiceAsrDataModule:
             self.args.cv_manifest_dir / f"../../en/fbank/cv-en_cuts_test.jsonl.gz"
         )
 
-
     @lru_cache()
     def test_es_cuts(self) -> CutSet:
         logging.info("About to get test-es cuts")
         return load_manifest_lazy(
             self.args.cv_manifest_dir / f"../../es/fbank/cv-es_cuts_test.jsonl.gz"
+        )
+
+    @lru_cache()
+    def test_ko_cuts(self) -> CutSet:
+        logging.info("About to get test-ko cuts")
+        return load_manifest_lazy(
+            #self.args.cv_manifest_dir / f"cv-{self.args.language}_cuts_dev.jsonl.gz"
+            self.args.cv_manifest_dir / f"../../full/fbank/hd100_grap_cuts_test-clean.jsonl.gz"
         )

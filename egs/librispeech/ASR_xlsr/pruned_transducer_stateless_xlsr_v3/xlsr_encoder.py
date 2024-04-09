@@ -74,7 +74,7 @@ class XLSREncoder(EncoderInterface):
         model = models[0]
         model.feature_grad_mult = 0.0 ## for conv network freeze
         model.mask_prob = 0.5 ## for conv network freeze
-
+        
         self.encoders = model
         self.pretrained_params = copy.deepcopy(model.state_dict())
 
@@ -197,11 +197,11 @@ class MultiXLSREncoder(EncoderInterface):
             model = models[0]
             model.feature_grad_mult = 0.0 ## for conv network freeze
             model.mask_prob = 0.5 ## for conv network freeze
-             
+            
             self.pretrained_params = copy.deepcopy(model.state_dict())
 
             self.encoders.append(model)
-
+            
         if model.cfg.encoder_embed_dim != output_size or additional_block:
             # TODO(xkc09): try LSTM
             self.output_layer = [torch.nn.Sequential(
@@ -226,6 +226,7 @@ class MultiXLSREncoder(EncoderInterface):
         lstm = None,
         linear = None,
         softmax = None,
+        ctc_output = None,
         warmup = None,
         prev_states: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -244,8 +245,8 @@ class MultiXLSREncoder(EncoderInterface):
             xs_pad = torch.nn.functional.layer_norm(xs_pad, xs_pad.shape)
 
         masks = make_pad_mask(ilens).to(xs_pad.device)
-
-        ft = (self.freeze_finetune_updates <= self.num_updates) and self.encoders.training
+        
+        ft = (self.freeze_finetune_updates <= self.num_updates) and self.encoders[0].training
         if self.num_updates <= self.freeze_finetune_updates:
             self.num_updates += 1
         elif ft and self.num_updates == self.freeze_finetune_updates + 1:
@@ -254,14 +255,42 @@ class MultiXLSREncoder(EncoderInterface):
         
         with torch.no_grad() if not ft else contextlib.nullcontext():
             cnn_outputs = self.encoders[0].feature_extractor(xs_pad)
-            #
-            enc_outputs = self.encoders(
-                xs_pad,
-                masks,
-                mask = ft,
-                features_only=True,
-            )
+            cnn_outputs = cnn_outputs.transpose(1, 2) 
+            output = lstm(cnn_outputs)
 
+            final = []
+            final = torch.tensor(final).to('cuda')
+            
+            final = output[0][:, -1, :]
+            #final = output[0][:, 100, :]
+            '''
+            for i in range(len(x_lens)):
+                new_output = output[0][i, x_lens[i]-1, :]
+                new_output = new_output.reshape(1, -1)
+                final = torch.cat((final, new_output), dim=0)
+            '''
+            lid_final = linear(final)
+            lid_final = softmax(lid_final)
+
+            max_lid = torch.argmax(lid_final, dim=1)
+            
+            enc_outputs = None
+
+            for i, lid in enumerate(max_lid):
+                lid = lid.item()
+                new_xs = xs_pad[i].unsqueeze(0)
+                new_masks = masks[i].unsqueeze(0)
+                enc_outputs_part = self.encoders[lid](
+                    new_xs,
+                    new_masks,
+                    mask = ft,
+                    features_only=True,
+                )
+
+                if i == 0:
+                    enc_outputs = enc_outputs_part
+                ## TODO: batch decoding....
+        
         xs_pad = enc_outputs["x"]  # (B,T,C),
         bs = xs_pad.shape[0]
         if enc_outputs["padding_mask"] is not None:
@@ -269,11 +298,31 @@ class MultiXLSREncoder(EncoderInterface):
             olens = (~masks).sum(dim=1)  # (B)
         else:
             olens = torch.IntTensor([xs_pad.shape[1]]).repeat(bs).to(xs_pad.device)
-
+        
+        xs_pad_new = None
         if self.output_layer is not None:
-            xs_pad = self.output_layer(xs_pad)
-
-        return xs_pad, olens, cnn_outputs
+            for i, lid in enumerate(max_lid):
+                new_xs = xs_pad[i].unsqueeze(0)
+                new_xs = self.output_layer[lid](new_xs)
+                
+                if i == 0:
+                    xs_pad_new = new_xs
+                ## TODO: batch decoding...
+        
+        xs_pad = xs_pad_new
+        
+        '''
+        for i, lid in enumerate(max_lid):
+            ctc_res = ctc_output[lid](xs_pad[i].unsqueeze(0))
+            ctc_res = softmax(ctc_res)
+            ctc_prob, ctc_idx = ctc_res.max(-1)
+            ctc_prob = ctc_prob[ctc_idx!=0]
+        '''
+        #if lstm == None:
+        #    return xs_pad, olens, cnn_outputs
+        #else:
+        #    return xs_pad, olens, max_lid
+        return xs_pad, olens, cnn_outputs if lstm == None else max_lid
 
     def reload_pretrained_parameters(self):
         self.encoders.load_state_dict(self.pretrained_params)

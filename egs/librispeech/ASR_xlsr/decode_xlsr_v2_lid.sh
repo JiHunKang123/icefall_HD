@@ -3,9 +3,9 @@ for method in lid; do
 	  --input-strategy AudioSamples \
 	  --enable-spec-aug False \
 	  --additional-block True \
-	  --model-name epoch-30.pt \
-	  --exp-dir ./pruned_transducer_stateless_xlsr_v2/xlsr_lid \
-	  --max-duration 400 \
+	  --model-name best-train-loss.pt \
+	  --exp-dir /workspace/icefall_hd/egs/librispeech/ASR/pruned_transducer_stateless_xlsr_v2/xlsr_lid_ko_hd100_allsec \
+	  --max-duration 25 \
 	  --decoding-method $method \
 	  --max-sym-per-frame 1 \
 	  --encoder-type xlsr \
@@ -15,4 +15,5 @@ for method in lid; do
 	  --decode-data-type commonvoice \
 	  --lid True \
 	  --bpe-model data/en/lang_bpe_500/bpe.model
+	  #--exp-dir ./pruned_transducer_stateless_xlsr_v2/xlsr_lid_eql_2sec_60epoch \
 done

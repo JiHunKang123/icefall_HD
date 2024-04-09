@@ -89,7 +89,7 @@ def get_parser():
         default="",
         help="""It specifies the model file name to use for decoding.""",
     )
-
+    
     parser.add_argument(
         "--epoch",
         type=int,
@@ -425,7 +425,7 @@ def decode_one_batch(
         )
         for hyp in sp.decode(hyp_tokens):
             hyps.append(hyp.split())
-    elif params.decoding_method == "greedy_search_batch" and params.max_sym_per_frame == 1:
+    elif params.decoding_method == "greedy_search" and params.max_sym_per_frame == 1:
         hyp_tokens = greedy_search_batch(
             model=model,
             encoder_out=encoder_out,
@@ -629,18 +629,16 @@ def decode_dataset(
                 print('calculating ko acc...', 100 * tot_ko_corrects / tot_ko_utt)
             print('calculating total acc...', 100 * tot_num_corrects / tot_utt)
             continue
+        
         for name, hyps in hyps_dict.items():
             this_batch = []
             assert len(hyps) == len(texts)
             for cut_id, hyp_words, ref_text in zip(cut_ids, hyps, texts):
-                print("hyp: ", ' '.join(hyp_words))
-                print("ref: ", ref_text)
-                print('')
                 ref_words = ref_text.split()
                 this_batch.append((cut_id, ref_words, hyp_words))
 
             results[name].extend(this_batch)
-
+        
         num_cuts += len(texts)
 
         if batch_idx % log_interval == 0:
@@ -757,11 +755,22 @@ def main():
         device = torch.device("cuda", 0)
 
     logging.info(f"Device: {device}")
-
-    sp = spm.SentencePieceProcessor()
-    sp.load(params.bpe_model)
+    bpe_models = params.bpe_model.split(',')
+    
+    sp_en = spm.SentencePieceProcessor()
+    sp_en.load(bpe_models[0])
+    
+    sp_es = spm.SentencePieceProcessor()
+    sp_es.load(bpe_models[1])
+    
+    sp_ko = spm.SentencePieceProcessor()
+    sp_ko.load(bpe_models[2])
+    
+    #sp = spm.SentencePieceProcessor()
+    #sp.load(params.bpe_model)
 
     # <blk> and <unk> are defined in local/train_bpe_model.py
+    ###### 이 부분은 나중에 language 결정 될때 멀 쓸지 정해야 하는거 아닌감.. #####
     params.blank_id = sp.piece_to_id("<blk>")
     params.unk_id = sp.piece_to_id("<unk>")
     params.vocab_size = sp.get_piece_size()
@@ -775,9 +784,63 @@ def main():
 
     logging.info("About to create model")
     model = get_transducer_model(params)
-    
-    if params.model_name:
+    #print(dir(model.encoder))
+
+    if params.model_name and params.language_num == 1:
         load_checkpoint(f"{params.exp_dir}/{params.model_name}", model)
+    elif params.model_name and params.language_num > 1:
+        model_names = params.model_name.split(',')
+        lid_model = f"{params.exp_dir}/{model_names[0]}"
+        lid_model = torch.load(lid_model)['model']
+        for n, p in model.named_parameters():
+            if 'lstm' in n or 'lid' in n:
+                p.data = lid_model[n]
+
+        ##TODO: 모델 로드, 파라미터 덮어씌우기
+        ##### en model #####
+        en_model = f"{params.exp_dir}/{model_names[1]}"
+        en_model = torch.load(en_model)['model']
+        #print(en_model.keys())
+        # encoder
+        for n, p in model.encoder.encoders[0].named_parameters():
+            p.data = en_model[f"encoder.encoders.{n}"]
+        # decoder
+        for n, p in model.decoder[0].named_parameters():
+            p.data = en_model[f"decoder.{n}"]
+        # joiner
+        for n, p in model.joiner[0].named_parameters():
+            p.data = en_model[f"joiner.{n}"]
+
+        ##### es model #####
+        es_model = f"{params.exp_dir}/{model_names[2]}"
+        es_model = torch.load(es_model)['model']
+
+        # encoder
+        for n, p in model.encoder.encoders[1].named_parameters():
+            p.data = es_model[f"encoder.encoders.{n}"]
+        # decoder
+        for n, p in model.decoder[1].named_parameters():
+            p.data = es_model[f"decoder.{n}"]
+        # joiner
+        for n, p in model.joiner[1].named_parameters():
+            p.data = es_model[f"joiner.{n}"]
+
+        ##### ko model #####
+        ko_model = f"{params.exp_dir}/{model_names[3]}"
+        ko_model = torch.load(ko_model)['model']
+
+        # encoder
+        for n, p in model.encoder.encoders[2].named_parameters():
+            p.data = ko_model[f"encoder.encoders.{n}"]
+        # decoder
+        for n, p in model.decoder[2].named_parameters():
+            p.data = ko_model[f"decoder.{n}"]
+        # joiner
+        for n, p in model.joiner[2].named_parameters():
+            p.data = ko_model[f"joiner.{n}"]
+
+        exit()
+        
     else:
         if not params.use_averaged_model:
             if params.iter > 0:
@@ -918,7 +981,7 @@ def main():
                 dev_cuts = commonvoice.dev_ko_cuts()
                 test_cuts = commonvoice.test_ko_cuts()
         
-        dev_dl = commonvoice.test_dataloaders(dev_cuts)
+        dev_dl = commonvoice.valid_dataloaders(dev_cuts)
         test_dl = commonvoice.test_dataloaders(test_cuts)
 
         #test_sets = ["dev"]

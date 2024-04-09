@@ -23,4 +23,4 @@ export CUDA_VISIBLE_DEVICES="0,1,2,3"
  --additional-block True \
  --prune-range 5 \
  --context-size 2 \
- --ctc-loss-scale 0.2
+ --ctc-loss-scale 0.2 
