@@ -31,6 +31,7 @@ Usage:
 import argparse
 import logging
 import math
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -60,9 +61,13 @@ from icefall.checkpoint import (
 from icefall.utils import (
     AttributeDict,
     setup_logger,
+    DecodingResults,
+    parse_hyp_and_timestamp,
     store_transcripts,
+    store_transcripts_and_timestamps,
     str2bool,
     write_error_stats,
+    write_error_stats_with_timestamps,
 )
 
 LOG_EPS = math.log(1e-10)
@@ -78,7 +83,7 @@ def get_parser():
         type=int,
         default=28,
         help="""It specifies the checkpoint to use for decoding.
-        Note: Epoch counts from 1.
+        Note: Epoch counts from 0.
         You can specify --avg to use more checkpoints for model averaging.""",
     )
 
@@ -115,7 +120,7 @@ def get_parser():
     parser.add_argument(
         "--exp-dir",
         type=str,
-        default="pruned_transducer_stateless4/exp",
+        default="pruned_transducer_stateless2/exp",
         help="The experiment dir",
     )
 
@@ -238,6 +243,7 @@ def decode_one_chunk(
     processed_lens = []
 
     for stream in decode_streams:
+        
         feat, feat_len = stream.get_feature_frames(
             params.decode_chunk_size * params.subsampling_factor
         )
@@ -245,7 +251,7 @@ def decode_one_chunk(
         feature_lens.append(feat_len)
         states.append(stream.states)
         processed_lens.append(stream.done_frames)
-
+        
     feature_lens = torch.tensor(feature_lens, device=device)
     features = pad_sequence(features, batch_first=True, padding_value=LOG_EPS)
 
@@ -270,7 +276,8 @@ def decode_one_chunk(
         torch.stack([x[1] for x in states], dim=2),
     ]
     processed_lens = torch.tensor(processed_lens, device=device)
-
+    
+    
     encoder_out, encoder_out_lens, states = model.encoder.streaming_forward(
         x=features,
         x_lens=feature_lens,
@@ -313,9 +320,81 @@ def decode_one_chunk(
         decode_streams[i].done_frames += encoder_out_lens[i]
         if decode_streams[i].done:
             finished_streams.append(i)
-
+            
     return finished_streams
 
+def time_stamp(
+    streams: List[DecodeStream],
+    sp: spm.SentencePieceProcessor,
+    blank_id: int,
+):
+    # new_cut_id = '-'.join(streams.cut_id.split('-')[:-1])
+
+    # if new_cut_id == "8131-117029-0017":    
+    #     return None, None
+
+    with open("./data/lang_bpe_500/tokens.txt", 'r') as f:
+        token_list = []
+        lines = f.readlines()
+        for line in lines:
+            token_list.append(line.split(" ")[0])
+
+    # end token time stamp
+    streams.last_token_time = streams.stamp_time[-1] * 1000
+    
+    # first token time stamp
+    for i, v in enumerate(streams.hyp):
+        if v != blank_id:
+            if len(streams.tokenized_first_token) == 0:
+                if token_list[v].startswith('▁'):
+                    tokenized_hyp = token_list[v].replace('▁', '')
+                    streams.tokenized_first_token = tokenized_hyp
+                else:
+                    streams.tokenized_first_token = token_list[v]
+            else:
+                if token_list[v].startswith('▁'):
+                    streams.first_token_time = (streams.stamp_time[i-3] - streams.stamp_time[i-4]) * 1000
+                    break
+                else:
+                    tokenized_hyp = token_list[v].replace('▁', '')
+                    streams.tokenized_first_token = streams.tokenized_first_token + tokenized_hyp
+
+    ground_truth = sp.decode(streams.decoding_result()).split()
+    
+    if ground_truth[0] == streams.tokenized_first_token:
+        return streams.first_token_time, streams.last_token_time
+    
+    return None, streams.last_token_time
+
+
+    # speaker_id, book_id, sentence_id, _ = streams.cut_id.split("-")
+    # alignment_path = './data/alignment/LibriSpeech/{}/{}/{}/{}-{}.alignment.txt'.format(set_name, speaker_id, book_id, speaker_id, book_id)
+
+    # ref_first_word = ""
+    # ref_PR = 0.0
+    # ref_EP = 0.0
+
+    # with open(alignment_path, "r") as f:
+    #     for line in f:
+    #         # Retrieve the utterance id, the words as a list and the end_times as a list
+    #         utterance_id, words, end_times = line.strip().split(' ')
+    #         if utterance_id != new_cut_id:
+    #             continue
+            
+    #         ref_first_word = words.replace('\"', '').split(',')[1]
+    #         end_times = [float(e) for e in end_times.replace('\"', '').split(',')]
+    #         ref_PR = end_times[1]
+    #         ref_EP = end_times[-1]
+
+    # EP = streams.last_token_time - ref_EP
+    
+    # if ref_first_word != streams.tokenized_first_token:
+    #     return None, EP
+
+    # PR = streams.first_token_time - ref_PR
+
+    # return PR, EP    
+            
 
 def decode_dataset(
     cuts: CutSet,
@@ -323,7 +402,7 @@ def decode_dataset(
     model: nn.Module,
     sp: spm.SentencePieceProcessor,
     decoding_graph: Optional[k2.Fsa] = None,
-) -> Dict[str, List[Tuple[List[str], List[str]]]]:
+):
     """Decode dataset.
 
     Args:
@@ -359,8 +438,14 @@ def decode_dataset(
     decode_results = []
     # Contain decode streams currently running.
     decode_streams = []
+
+    PR_list = []
+    EP_list = []
+
     initial_states = model.encoder.get_init_state(params.left_context, device=device)
     for num, cut in enumerate(cuts):
+        # set_name = cut.recording.sources[0].source.split("/")[10]
+
         # each utterance has a DecodeStream.
         decode_stream = DecodeStream(
             params=params,
@@ -387,12 +472,16 @@ def decode_dataset(
         decode_stream.ground_truth = cut.supervisions[0].text
 
         decode_streams.append(decode_stream)
-
+        decode_streams[0].token_start_time = time.time()
         while len(decode_streams) >= params.num_decode_streams:
+
             finished_streams = decode_one_chunk(
                 params=params, model=model, decode_streams=decode_streams
             )
             for i in sorted(finished_streams, reverse=True):
+                PR, EP = time_stamp(decode_streams[i], sp, model.decoder.blank_id)
+                EP_list.append(int(EP))
+
                 decode_results.append(
                     (
                         decode_streams[i].id,
@@ -401,10 +490,10 @@ def decode_dataset(
                     )
                 )
                 del decode_streams[i]
-
+        
         if num % log_interval == 0:
             logging.info(f"Cuts processed until now is {num}.")
-
+    
     # decode final chunks of last sequences
     while len(decode_streams):
         finished_streams = decode_one_chunk(
@@ -419,6 +508,8 @@ def decode_dataset(
                 )
             )
             del decode_streams[i]
+    
+    MED = sum(EP_list) / len(EP_list)
 
     if params.decoding_method == "greedy_search":
         key = "greedy_search"
@@ -432,13 +523,13 @@ def decode_dataset(
         key = f"num_active_paths_{params.num_active_paths}"
     else:
         raise ValueError(f"Unsupported decoding method: {params.decoding_method}")
-    return {key: decode_results}
-
+    return {key: decode_results}, MED
 
 def save_results(
     params: AttributeDict,
     test_set_name: str,
     results_dict: Dict[str, List[Tuple[List[str], List[str]]]],
+    MED: float,
 ):
     test_set_wers = dict()
     for key, results in results_dict.items():
@@ -470,6 +561,7 @@ def save_results(
     for key, val in test_set_wers:
         s += "{}\t{}{}\n".format(key, val, note)
         note = ""
+    s += "Mean Endpoint Delay : {}".format(MED)
     logging.info(s)
 
 
@@ -528,7 +620,7 @@ def main():
 
     logging.info("About to create model")
     model = get_transducer_model(params)
-
+    
     if not params.use_averaged_model:
         if params.iter > 0:
             filenames = find_checkpoints(params.exp_dir, iteration=-params.iter)[
@@ -626,7 +718,7 @@ def main():
     test_cuts = [test_clean_cuts, test_other_cuts]
 
     for test_set, test_cut in zip(test_sets, test_cuts):
-        results_dict = decode_dataset(
+        results_dict, MED = decode_dataset(
             cuts=test_cut,
             params=params,
             model=model,
@@ -638,6 +730,7 @@ def main():
             params=params,
             test_set_name=test_set,
             results_dict=results_dict,
+            MED=MED
         )
 
     logging.info("Done!")

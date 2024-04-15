@@ -26,7 +26,7 @@ export CUDA_VISIBLE_DEVICES="0,1,2,3"
   --world-size 4 \
   --num-epochs 30 \
   --start-epoch 1 \
-  --exp-dir pruned_transducer_stateless4/exp \
+  --exp-dir pruned_transducer_stateless2/exp \
   --full-libri 1 \
   --max-duration 300
 
@@ -37,7 +37,7 @@ export CUDA_VISIBLE_DEVICES="0,1,2,3"
   --num-epochs 30 \
   --start-epoch 1 \
   --use-fp16 1 \
-  --exp-dir pruned_transducer_stateless4/exp \
+  --exp-dir pruned_transducer_stateless2/exp \
   --full-libri 1 \
   --max-duration 550
 
@@ -77,7 +77,7 @@ from joiner import Joiner
 from lhotse.cut import Cut
 from lhotse.dataset.sampling.base import CutSampler
 from lhotse.utils import fix_random_seed
-from model import Transducer
+from model import KD_transducer, Transducer
 from optim import Eden, Eve
 from torch import Tensor
 from torch.cuda.amp import GradScaler
@@ -195,13 +195,21 @@ def get_parser():
     parser.add_argument(
         "--exp-dir",
         type=str,
-        default="pruned_transducer_stateless4/exp",
+        default="pruned_transducer_stateless2/exp",
         help="""The experiment dir.
         It specifies the directory where all training related
         files, e.g., checkpoints, log, etc, are saved
         """,
     )
-
+    parser.add_argument(
+        "--teacher-exp-dir",
+        type=str,
+        default="pruned_transducer_stateless5/exp-960",
+        help="""The teacher model experiment dir.
+        It specifies the directory where all training related
+        files, e.g., checkpoints, log, etc, are saved
+        """,
+    )
     parser.add_argument(
         "--bpe-model",
         type=str,
@@ -272,6 +280,18 @@ def get_parser():
         "training (as a regularization item). We will scale the simple loss"
         "with this parameter before adding to the final loss.",
     )
+    parser.add_argument(
+        "--kd-scale",
+        type=float,
+        default=0.3,
+        help="The scale of Knowledge distillation loss part.",
+    )
+    parser.add_argument(
+        "--kd-type",
+        type=str,
+        default='kl',
+        help="The type of KD loss.",
+    )
 
     parser.add_argument(
         "--seed",
@@ -296,7 +316,7 @@ def get_parser():
         params.batch_idx_train % save_every_n == 0. The checkpoint filename
         has the form: f'exp-dir/checkpoint-{params.batch_idx_train}.pt'
         Note: It also saves checkpoint to `exp-dir/epoch-xxx.pt` at the
-        end of each epoch where `xxx` is the epoch number counting from 1.
+        end of each epoch where `xxx` is the epoch number counting from 0.
         """,
     )
 
