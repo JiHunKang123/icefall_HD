@@ -26,7 +26,7 @@ cd icefall_HD/egs/commonvoice/ASR
 ./prepare_en.sh
 ./prepare_es.sh
 
-# move data folder to icefall_HD/egs/librispeech/ASR/data/{language} or symbolic link ..
+# MUST move data folder to icefall_HD/egs/librispeech/ASR/data/{language} or symbolic link ..
 ```
 
 2. HD100 dataset prepare(for Korean)
@@ -42,7 +42,7 @@ mv librispeech_cuts_dev-clean.jsonl.gz hd_100_cuts_dev-clean.jsonl.gz
 mv librispeech_cuts_test-clean.jsonl.gz hd_100_cuts_test-clean.jsonl.gz
 ##### This can be skipped #####
 
-# move data folder to icefall_HD/egs/librispeech/ASR/data/ko or symbolic link ..
+# MUST move data folder to icefall_HD/egs/librispeech/ASR/data/ko or symbolic link ..
 ```
 
 3. Full dataset prepare(for train lid)
@@ -56,7 +56,7 @@ cd ../en/fbank
 cp cv-en_cuts_*.jsonl.gz ../../full/fbank
 
 cd ../es/fbank
-cp cv-es_cuts_*.jsnol.gz ../../full/fbank
+cp cv-es_cuts_*.jsonl.gz ../../full/fbank
 
 cd ../ko/fbank
 cp hd100_cuts_*.jsonl.gz ../../full/fbank
