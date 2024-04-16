@@ -53,3 +53,6 @@ for method in greedy_search modified_beam_search fast_beam_search; do
     --joiner-dim 1024
 done
 ```
+
+# Spoken Language Identification
+For LID, see this [README.md](https://github.com/JiHunKang123/icefall_HD/blob/master/egs/librispeech/ASR_xlsr/pruned_transducer_stateless_xlsr_v3/README.md)
