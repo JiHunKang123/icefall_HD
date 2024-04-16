@@ -15,7 +15,7 @@
 | 85.50 | 93.57 | 99.58 | 92.89 |
 
 
-# Installation
+# How to use
 
 - Dataset preparation
 
