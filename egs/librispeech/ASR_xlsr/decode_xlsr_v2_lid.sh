@@ -4,7 +4,7 @@ for method in lid; do
 	  --enable-spec-aug False \
 	  --additional-block True \
 	  --model-name best-train-loss.pt \
-	  --exp-dir /workspace/icefall_hd/egs/librispeech/ASR/pruned_transducer_stateless_xlsr_v2/xlsr_lid_ko_hd100_allsec \
+	  --exp-dir ./pruned_transducer_stateless_xlsr_v2/tmp \
 	  --max-duration 25 \
 	  --decoding-method $method \
 	  --max-sym-per-frame 1 \
